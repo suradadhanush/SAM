@@ -192,7 +192,7 @@ def main():
     logs_p.add_argument("--lines", type=int, default=50)
 
     mem_p = subparsers.add_parser("memory")
-    mem_p.add_parser("memory")
+    mem_p.add_argument("--limit", type=int, default=10)
     mem_p.add_argument("--limit", type=int, default=10)
 
     subparsers.add_parser("founder")
