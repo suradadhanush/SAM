@@ -1,0 +1,16 @@
+{
+  "name": "Dhanush",
+  "assistant_name": "SAM",
+  "about": "First-year B.Tech CSE student at NSRIT Visakhapatnam. Building SAM.",
+  "projects": [
+    "SAM \u2014 local AI assistant",
+    "AnonCampus \u2014 NLP grievance platform",
+    "NSRIT eSports Arena \u2014 tournament platform"
+  ],
+  "preferences": {
+    "communication_style": "direct, no fluff, founder energy",
+    "technical_depth": "high \u2014 understands systems, products, architecture",
+    "response_length": "concise for voice, detailed when asked"
+  },
+  "context": "Building SAM as both a personal tool and a consumer product."
+}

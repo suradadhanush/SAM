@@ -50,6 +50,15 @@ fi
 PYTHON_VERSION=$($PYTHON --version)
 echo "  Found: $PYTHON_VERSION"
 
+echo -e "${GREEN}[1.5/8] Checking PortAudio...${NC}"
+
+if ! brew list portaudio >/dev/null 2>&1; then
+    echo "  Installing PortAudio..."
+    brew install portaudio
+else
+    echo "  PortAudio already installed"
+fi
+
 echo -e "${GREEN}[2/8] Installing Ollama...${NC}"
 if ! command -v ollama &> /dev/null; then
     echo "  Downloading Ollama..."
