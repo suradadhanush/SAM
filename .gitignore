@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+
+# SAM Runtime Data (don't commit personal data)
+memory/store/chroma/
+memory/store/*.db
+founder_mode/store/*.db
+founder_mode/export/
+skills/compiled/*.json
+skills/skills.db
+logs/*.log
+logs/*.log.*
+
+# Keep directory structure
+!memory/store/.gitkeep
+!founder_mode/store/.gitkeep
+!founder_mode/export/.gitkeep
+!skills/compiled/.gitkeep
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Env
+.env
+*.env
+
+# Build
+dist/
+build/
+*.egg-info/

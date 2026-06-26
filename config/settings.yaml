@@ -1,0 +1,35 @@
+# SAM Settings — Edit this file to customise behaviour
+# All values here override the defaults in config/settings.py
+
+assistant_name: "SAM"
+user_name: "Dhanush"
+
+# Brain
+ollama_host: "http://localhost:11434"
+temperature: 0.7
+max_tokens: 1024
+
+# Ears
+wake_word: "hey sam"
+wake_word_threshold: 0.5
+whisper_model: "base.en"
+recording_timeout: 8.0
+
+# Mouth
+tts_engine: "kokoro"
+kokoro_voice: "af_bella"
+speech_rate: 1.0
+
+# Vision
+vision_model: "moondream"
+
+# Memory
+memory_top_k: 5
+embedding_model: "nomic-embed-text"
+
+# Founder Mode
+founder_mode_enabled: true
+
+# Runtime
+incognito: false
+log_level: "INFO"
