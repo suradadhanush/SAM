@@ -16,10 +16,12 @@ Commands:
   export        Export Founder Mode decisions
 """
 
+from asyncio import subprocess
 import sys
 import json
 import argparse
 from pathlib import Path
+from unittest import result
 
 
 def cmd_start():
@@ -43,9 +45,15 @@ def cmd_status():
         print("❌ Ollama not running. Start with: ollama serve")
 
     # Check SAM process
-    result = subprocess.run(["pgrep", "-f", "main.py"], capture_output=True, text=True)
-    if result.returncode == 0:
-        print(f"✅ SAM running (PID: {result.stdout.strip()})")
+    result = subprocess.run(
+    ["pgrep", "-af", "python.*main.py"],
+    capture_output=True,
+    text=True
+    )   
+
+    if result.returncode == 0 and result.stdout.strip():
+        print("✅ SAM running:")
+        print(result.stdout.strip())
     else:
         print("❌ SAM not running. Start with: python main.py")
 
@@ -192,7 +200,6 @@ def main():
     logs_p.add_argument("--lines", type=int, default=50)
 
     mem_p = subparsers.add_parser("memory")
-    mem_p.add_argument("--limit", type=int, default=10)
     mem_p.add_argument("--limit", type=int, default=10)
 
     subparsers.add_parser("founder")
