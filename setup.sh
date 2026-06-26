@@ -39,7 +39,15 @@ if ! command -v python3 &> /dev/null; then
     fi
     brew install python3
 fi
-PYTHON_VERSION=$(python3 --version)
+if command -v python3.11 >/dev/null 2>&1; then
+    PYTHON=python3.11
+elif command -v python3.12 >/dev/null 2>&1; then
+    PYTHON=python3.12
+else
+    PYTHON=python3
+fi
+
+PYTHON_VERSION=$($PYTHON --version)
 echo "  Found: $PYTHON_VERSION"
 
 echo -e "${GREEN}[2/8] Installing Ollama...${NC}"
@@ -80,7 +88,18 @@ echo "  Pulling vision model: moondream"
 ollama pull moondream
 
 echo -e "${GREEN}[5/8] Creating Python virtual environment...${NC}"
-python3 -m venv .venv
+
+if command -v python3.11 >/dev/null 2>&1; then
+    PYTHON=python3.11
+elif command -v python3.12 >/dev/null 2>&1; then
+    PYTHON=python3.12
+else
+    PYTHON=python3
+fi
+
+echo "  Using Python: $($PYTHON --version)"
+
+$PYTHON -m venv .venv
 source .venv/bin/activate
 pip install --upgrade pip --quiet
 
