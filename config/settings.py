@@ -17,7 +17,7 @@ BASE_DIR = Path(__file__).parent.parent
 @dataclass
 class Settings:
     # Identity
-    assistant_name: str = "SAM"
+    assistant_name: str = "KESAV"
     user_name: str = "Dhanush"
 
     # Brain
