@@ -7,28 +7,27 @@ requests>=2.31.0
 pyyaml>=6.0.1
 
 # ─── The Ears ──────────────────────────────────────────────────────────────
-faster-whisper>=1.0.0          # Whisper STT
-pyaudio>=0.2.14                # Microphone input
-openwakeword>=0.6.0            # Wake word detection
-soundfile>=0.12.1              # Audio file I/O
-sounddevice>=0.4.6             # Audio playback
+faster-whisper>=1.0.0
+pyaudio>=0.2.14
+openwakeword>=0.6.0
+soundfile>=0.12.1
+sounddevice>=0.4.6
 numpy>=1.24.0
 
 # ─── The Mouth ─────────────────────────────────────────────────────────────
 kokoro>=0.9.4                  # Primary TTS (Apache 2.0)
-# piper-tts                    # Install separately — see setup.sh
-
-# ─── The Brain ─────────────────────────────────────────────────────────────
-# Ollama itself is installed via: curl -fsSL https://ollama.com/install.sh | sh
-# Then: ollama pull qwen2.5:14b
+# Windows only — installed automatically on Windows:
+# pyttsx3                      # pip install pyttsx3
 
 # ─── The Hands ─────────────────────────────────────────────────────────────
-pyautogui>=0.9.54              # Mouse + keyboard control
-playwright>=1.44.0             # Browser automation
+pyautogui>=0.9.54
+playwright>=1.44.0
+Pillow>=10.0.0                 # PIL.ImageGrab for Windows screenshots
+# Windows only:
+# pywinauto                    # pip install pywinauto
 
 # ─── Memory ────────────────────────────────────────────────────────────────
-chromadb>=0.5.0                # Vector/semantic memory
-# nomic-embed-text runs via Ollama: ollama pull nomic-embed-text
+chromadb>=0.5.0
 
 # ─── Utilities ─────────────────────────────────────────────────────────────
 python-dotenv>=1.0.0

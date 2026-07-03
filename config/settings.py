@@ -1,23 +1,28 @@
 """
 SAM Configuration — All settings in one place.
+Cross-platform: macOS + Windows
 Edit config/settings.yaml to change behaviour without touching code.
 """
 
 import yaml
 import os
+import platform
 from pathlib import Path
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
 
 CONFIG_PATH = Path(__file__).parent / "settings.yaml"
 BASE_DIR = Path(__file__).parent.parent
+
+PLATFORM = platform.system()
+IS_MAC = PLATFORM == "Darwin"
+IS_WIN = PLATFORM == "Windows"
 
 
 @dataclass
 class Settings:
     # Identity
-    assistant_name: str = "KESAV"
+    assistant_name: str = "SAM"
     user_name: str = "Dhanush"
 
     # Brain
@@ -31,19 +36,19 @@ class Settings:
     # Ears
     wake_word: str = "hey sam"
     wake_word_threshold: float = 0.5
-    whisper_model: str = "base.en"          # tiny.en / base.en / small.en
-    whisper_device: str = "auto"            # auto detects Apple Silicon
-    recording_timeout: float = 8.0          # seconds to record after wake word
+    whisper_model: str = "base.en"
+    whisper_device: str = "auto"
+    recording_timeout: float = 8.0
     silence_threshold: float = 0.01
 
     # Mouth
-    tts_engine: str = "kokoro"              # kokoro | piper
-    kokoro_voice: str = "af_bella"         # Kokoro voice name
+    tts_engine: str = "kokoro"           # kokoro | piper | system | none
+    kokoro_voice: str = "af_bella"
     piper_model: str = "en_US-lessac-medium"
     speech_rate: float = 1.0
 
     # Vision
-    vision_model: str = "moondream"         # moondream | llava
+    vision_model: str = "moondream"      # moondream | llava
     screenshot_quality: int = 85
 
     # Memory
@@ -65,8 +70,9 @@ class Settings:
     log_level: str = "INFO"
     log_path: str = str(BASE_DIR / "logs" / "sam.log")
 
-    # Hardware (auto-detected on first run)
+    # Hardware (auto-detected)
     detected_ram_gb: Optional[int] = None
+    detected_platform: str = PLATFORM
 
     def __post_init__(self):
         self._load_yaml()
@@ -74,7 +80,6 @@ class Settings:
         self._select_model()
 
     def _load_yaml(self):
-        """Load overrides from settings.yaml if it exists."""
         if CONFIG_PATH.exists():
             with open(CONFIG_PATH) as f:
                 data = yaml.safe_load(f) or {}
@@ -83,20 +88,35 @@ class Settings:
                     setattr(self, key, value)
 
     def _detect_hardware(self):
-        """Detect RAM on macOS and set accordingly."""
+        """Detect RAM — works on macOS and Windows."""
         try:
             import subprocess
-            result = subprocess.run(
-                ["sysctl", "-n", "hw.memsize"],
-                capture_output=True, text=True
-            )
-            ram_bytes = int(result.stdout.strip())
-            self.detected_ram_gb = ram_bytes // (1024 ** 3)
+            if IS_MAC:
+                result = subprocess.run(
+                    ["sysctl", "-n", "hw.memsize"],
+                    capture_output=True, text=True
+                )
+                self.detected_ram_gb = int(result.stdout.strip()) // (1024 ** 3)
+            elif IS_WIN:
+                result = subprocess.run(
+                    ["wmic", "computersystem", "get", "TotalPhysicalMemory"],
+                    capture_output=True, text=True
+                )
+                lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip().isdigit()]
+                if lines:
+                    self.detected_ram_gb = int(lines[0]) // (1024 ** 3)
+            else:
+                # Linux
+                with open("/proc/meminfo") as f:
+                    for line in f:
+                        if line.startswith("MemTotal"):
+                            kb = int(line.split()[1])
+                            self.detected_ram_gb = kb // (1024 ** 2)
+                            break
         except Exception:
-            self.detected_ram_gb = 16  # Default assumption
+            self.detected_ram_gb = 16
 
     def _select_model(self):
-        """Auto-select model based on detected RAM."""
         if self.detected_ram_gb is None:
             return
         if self.detected_ram_gb >= 32:
@@ -107,10 +127,6 @@ class Settings:
             self.primary_model = "qwen2.5:7b"
 
     def save(self):
-        """Persist current settings to YAML."""
-        data = {
-            k: v for k, v in self.__dict__.items()
-            if not k.startswith("_")
-        }
+        data = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
         with open(CONFIG_PATH, "w") as f:
             yaml.dump(data, f, default_flow_style=False)
