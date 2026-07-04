@@ -2,7 +2,7 @@
 THE EARS — Part 1: Wake Word Detection
 Uses openWakeWord for passive 24/7 listening.
 Near-zero CPU. Triggers callback when wake word detected.
-Whisper is NOT used here — this is purely detection.
+Falls back to keyboard input if model files missing.
 """
 
 import logging
@@ -20,27 +20,31 @@ class WakeWordListener:
         self._running = False
         self._thread = None
         self._model = None
+        self._use_keyboard = False
 
     def _load_model(self):
-        """Load openWakeWord model."""
+        """Load openWakeWord model with proper error handling."""
         try:
+            # Download default models if missing
+            import openwakeword
+            openwakeword.utils.download_models()
+
             from openwakeword.model import Model
             self._model = Model(
-                wakeword_models=[],          # Uses default "hey jarvis" style models
+                wakeword_models=["hey_jarvis"],  # closest to "hey sam" available
                 inference_framework="onnx"
             )
             logger.info("openWakeWord model loaded")
-        except ImportError:
-            logger.warning("openWakeWord not installed — falling back to keyboard trigger")
+
+        except Exception as e:
+            logger.warning(f"openWakeWord failed ({e}) — using keyboard fallback")
             self._model = None
+            self._use_keyboard = True
 
     def _listen_loop(self):
-        """
-        Main listening loop.
-        Reads audio chunks, feeds to openWakeWord, fires callback on detection.
-        """
-        if self._model is None:
-            logger.info("Keyboard fallback mode: press Enter to trigger SAM")
+        """Main listening loop."""
+        if self._use_keyboard or self._model is None:
+            logger.info("Keyboard fallback mode active")
             self._keyboard_fallback()
             return
 
@@ -72,12 +76,10 @@ class WakeWordListener:
                 for model_name, score in prediction.items():
                     if score >= self.settings.wake_word_threshold:
                         logger.info(f"Wake word detected (score: {score:.2f})")
-                        # Fire callback in separate thread so listener stays active
                         threading.Thread(
                             target=self.callback,
                             daemon=True
                         ).start()
-                        # Brief pause to avoid double-trigger
                         import time
                         time.sleep(2)
                         break
@@ -87,21 +89,27 @@ class WakeWordListener:
             audio.terminate()
 
         except Exception as e:
-            logger.error(f"Wake word listener error: {e}", exc_info=True)
+            logger.error(f"Wake word listener error: {e} — switching to keyboard")
+            self._keyboard_fallback()
 
     def _keyboard_fallback(self):
         """
-        Fallback for testing without a microphone or openWakeWord.
-        Press Enter to simulate wake word detection.
+        Press ENTER to trigger SAM.
+        This is the active mode until openWakeWord models are confirmed working.
         """
-        print("\n[SAM] Keyboard fallback mode. Press ENTER to speak to SAM. Type 'quit' to exit.\n")
+        print("\n" + "="*50)
+        print("SAM KEYBOARD MODE")
+        print("Press ENTER to speak to SAM")
+        print("Type 'quit' to exit")
+        print("="*50 + "\n")
+
         while self._running:
             try:
-                user_input = input()
-                if user_input.lower() == "quit":
+                user_input = input(">> Press ENTER to activate SAM: ")
+                if user_input.lower().strip() == "quit":
                     self._running = False
                     break
-                self.callback()
+                threading.Thread(target=self.callback, daemon=True).start()
             except (EOFError, KeyboardInterrupt):
                 break
 

@@ -86,12 +86,26 @@ class TextToSpeech:
         if self._kokoro_pipeline is None:
             raise RuntimeError("Kokoro not available")
 
-        audio, sample_rate = self._kokoro_pipeline(
-            text,
-            voice=getattr(self.settings, "kokoro_voice", "af_bella"),
-            speed=getattr(self.settings, "speech_rate", 1.0)
-        )
-        self._play_audio_array(audio, sample_rate)
+        # Kokoro returns a generator of (graphemes, phonemes, audio) tuples
+        import numpy as np
+        voice = getattr(self.settings, "kokoro_voice", "af_bella")
+        speed = getattr(self.settings, "speech_rate", 1.0)
+        
+        audio_chunks = []
+        sample_rate = 24000  # Kokoro default
+        
+        for result in self._kokoro_pipeline(text, voice=voice, speed=speed):
+            # result is (graphemes, phonemes, audio) in newer Kokoro
+            if isinstance(result, tuple):
+                audio_chunk = result[-1]  # audio is always last
+            else:
+                audio_chunk = result
+            if audio_chunk is not None:
+                audio_chunks.append(audio_chunk)
+        
+        if audio_chunks:
+            audio = np.concatenate(audio_chunks)
+            self._play_audio_array(audio, sample_rate)
 
     def _load_kokoro(self):
         try:
