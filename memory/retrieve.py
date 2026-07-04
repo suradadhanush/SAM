@@ -1,11 +1,9 @@
 """
 Memory Retrieval — Gets relevant memories for the current query.
-Combines semantic search + recent episodes.
 """
 
 import logging
 from typing import List, Dict
-from pathlib import Path
 
 logger = logging.getLogger("SAM.MemoryRetriever")
 
@@ -21,17 +19,22 @@ class MemoryRetriever:
         return self._store
 
     def retrieve(self, query: str, settings=None, top_k: int = 5) -> List[Dict]:
-        """
-        Retrieve top-K relevant memories for the current query.
-        Returns list of memory dicts with 'content' key.
-        """
         try:
             store = self._get_store(settings)
             if store is None:
                 return []
 
-            memories = store.search_semantic(query, top_k=top_k)
-            return memories
+            # Guard: don't query if collection is empty
+            if store._collection is None:
+                return []
+
+            count = store._collection.count()
+            if count == 0:
+                return []
+
+            # Never request more than what exists
+            safe_k = min(top_k, count)
+            return store.search_semantic(query, top_k=safe_k)
 
         except Exception as e:
             logger.debug(f"Memory retrieval skipped: {e}")
