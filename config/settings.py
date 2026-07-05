@@ -1,7 +1,7 @@
 """
-SAM Configuration — All settings in one place.
-Cross-platform: macOS + Windows
-Edit config/settings.yaml to change behaviour without touching code.
+SAM Configuration
+All persistent data lives in ~/.sam_data — outside the SAM install folder.
+Wipe SAM, reinstall, clone fresh — your identity and memory survive.
 """
 
 import yaml
@@ -14,9 +14,28 @@ from typing import Optional
 CONFIG_PATH = Path(__file__).parent / "settings.yaml"
 BASE_DIR = Path(__file__).parent.parent
 
+# All user data lives here — persistent across reinstalls
+SAM_DATA_DIR = Path.home() / ".sam_data"
+
 PLATFORM = platform.system()
 IS_MAC = PLATFORM == "Darwin"
 IS_WIN = PLATFORM == "Windows"
+
+
+def _ensure_data_dirs():
+    """Create ~/.sam_data structure if it doesn't exist."""
+    dirs = [
+        SAM_DATA_DIR,
+        SAM_DATA_DIR / "memory" / "chroma",
+        SAM_DATA_DIR / "founder_mode",
+        SAM_DATA_DIR / "founder_mode" / "export",
+        SAM_DATA_DIR / "skills" / "compiled",
+        SAM_DATA_DIR / "logs",
+    ]
+    for d in dirs:
+        d.mkdir(parents=True, exist_ok=True)
+
+_ensure_data_dirs()
 
 
 @dataclass
@@ -42,35 +61,35 @@ class Settings:
     silence_threshold: float = 0.01
 
     # Mouth
-    tts_engine: str = "kokoro"           # kokoro | piper | system | none
+    tts_engine: str = "kokoro"
     kokoro_voice: str = "af_bella"
     piper_model: str = "en_US-lessac-medium"
     speech_rate: float = 1.0
 
     # Vision
-    vision_model: str = "moondream"      # moondream | llava
+    vision_model: str = "moondream"
     screenshot_quality: int = 85
 
-    # Memory
-    chroma_path: str = str(BASE_DIR / "memory" / "store" / "chroma")
-    sqlite_path: str = str(BASE_DIR / "memory" / "store" / "episodic.db")
+    # Memory — all in ~/.sam_data
+    chroma_path: str = str(SAM_DATA_DIR / "memory" / "chroma")
+    sqlite_path: str = str(SAM_DATA_DIR / "memory" / "episodic.db")
     memory_top_k: int = 5
     embedding_model: str = "nomic-embed-text"
 
-    # Founder Mode
+    # Founder Mode — in ~/.sam_data
     founder_mode_enabled: bool = True
-    founder_mode_path: str = str(BASE_DIR / "founder_mode" / "store")
+    founder_mode_path: str = str(SAM_DATA_DIR / "founder_mode")
 
-    # Skills
-    skills_path: str = str(BASE_DIR / "skills")
-    compiled_skills_path: str = str(BASE_DIR / "skills" / "compiled")
+    # Skills — in ~/.sam_data
+    skills_path: str = str(SAM_DATA_DIR / "skills")
+    compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")
 
     # Runtime
     incognito: bool = False
     log_level: str = "INFO"
-    log_path: str = str(BASE_DIR / "logs" / "sam.log")
+    log_path: str = str(SAM_DATA_DIR / "logs" / "sam.log")
 
-    # Hardware (auto-detected)
+    # Hardware
     detected_ram_gb: Optional[int] = None
     detected_platform: str = PLATFORM
 
@@ -80,15 +99,17 @@ class Settings:
         self._select_model()
 
     def _load_yaml(self):
-        if CONFIG_PATH.exists():
-            with open(CONFIG_PATH) as f:
+        # Check ~/.sam_data/settings.yaml first (user overrides)
+        user_config = SAM_DATA_DIR / "settings.yaml"
+        config_file = user_config if user_config.exists() else CONFIG_PATH
+        if config_file.exists():
+            with open(config_file) as f:
                 data = yaml.safe_load(f) or {}
             for key, value in data.items():
                 if hasattr(self, key):
                     setattr(self, key, value)
 
     def _detect_hardware(self):
-        """Detect RAM — works on macOS and Windows."""
         try:
             import subprocess
             if IS_MAC:
@@ -105,14 +126,6 @@ class Settings:
                 lines = [l.strip() for l in result.stdout.strip().split("\n") if l.strip().isdigit()]
                 if lines:
                     self.detected_ram_gb = int(lines[0]) // (1024 ** 3)
-            else:
-                # Linux
-                with open("/proc/meminfo") as f:
-                    for line in f:
-                        if line.startswith("MemTotal"):
-                            kb = int(line.split()[1])
-                            self.detected_ram_gb = kb // (1024 ** 2)
-                            break
         except Exception:
             self.detected_ram_gb = 16
 
@@ -128,5 +141,9 @@ class Settings:
 
     def save(self):
         data = {k: v for k, v in self.__dict__.items() if not k.startswith("_")}
-        with open(CONFIG_PATH, "w") as f:
+        with open(SAM_DATA_DIR / "settings.yaml", "w") as f:
             yaml.dump(data, f, default_flow_style=False)
+
+    @staticmethod
+    def data_dir() -> Path:
+        return SAM_DATA_DIR

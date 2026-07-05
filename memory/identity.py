@@ -1,7 +1,7 @@
 """
 Memory — Identity
-Stores and loads the user's core identity profile.
-Injected at every session start.
+Stored in ~/.sam_data/identity.json
+Survives SAM reinstalls, clones, and folder deletions.
 """
 
 import json
@@ -10,7 +10,8 @@ from pathlib import Path
 
 logger = logging.getLogger("SAM.Identity")
 
-IDENTITY_PATH = Path(__file__).parent / "store" / "identity.json"
+SAM_DATA_DIR = Path.home() / ".sam_data"
+IDENTITY_PATH = SAM_DATA_DIR / "identity.json"
 
 DEFAULT_IDENTITY = {
     "name": "Dhanush",
@@ -23,19 +24,21 @@ DEFAULT_IDENTITY = {
     ],
     "preferences": {
         "communication_style": "direct, no fluff, founder energy",
-        "technical_depth": "high — understands systems, products, architecture",
+        "technical_depth": "high",
         "response_length": "concise for voice, detailed when asked"
     },
-    "context": "Building SAM as both a personal tool and a consumer product."
+    "context": "Building SAM as both a personal tool and a future consumer product."
 }
 
 
 class Identity:
     def __init__(self):
-        IDENTITY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        SAM_DATA_DIR.mkdir(parents=True, exist_ok=True)
         if not IDENTITY_PATH.exists():
             self._save(DEFAULT_IDENTITY)
-            logger.info("Default identity created")
+            logger.info(f"Identity created at {IDENTITY_PATH}")
+        else:
+            logger.info(f"Identity loaded from {IDENTITY_PATH}")
 
     def load(self) -> dict:
         try:
@@ -54,3 +57,7 @@ class Identity:
     def _save(self, data: dict):
         with open(IDENTITY_PATH, "w") as f:
             json.dump(data, f, indent=2)
+
+    @staticmethod
+    def path() -> Path:
+        return IDENTITY_PATH
