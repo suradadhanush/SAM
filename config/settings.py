@@ -79,6 +79,11 @@ class Settings:
     # Founder Mode — in ~/.sam_data
     founder_mode_enabled: bool = True
     founder_mode_path: str = str(SAM_DATA_DIR / "founder_mode")
+    # v2: LLM-based auto-capture (Evidence + Confidence). Falls back to a
+    # lightweight heuristic if Ollama/the classifier is unavailable.
+    founder_mode_llm_capture: bool = True
+    founder_mode_classifier_model: Optional[str] = None  # None -> uses primary_model
+    founder_mode_min_confidence_to_show: float = 0.3
 
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")

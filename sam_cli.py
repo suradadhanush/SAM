@@ -7,7 +7,8 @@ Commands:
   status              Check SAM + Ollama status
   logs                Tail SAM logs
   memory              Show recent memories
-  founder             Show Founder Mode decisions + taste
+  founder             Show Founder Mode decisions + taste (--all for superseded/rejected too)
+  founder-review      Confirm or reject LLM auto-captured entries
   skills              List compiled skills
   decision            Add a decision to Founder Mode
   rejection           Add a rejection to Founder Mode
@@ -102,39 +103,97 @@ def cmd_memory(limit: int = 10):
 
 # ─── Founder Mode ─────────────────────────────────────────────────────────
 
-def cmd_founder():
+def _conf_tag(conf) -> str:
+    try:
+        c = float(conf)
+    except (TypeError, ValueError):
+        return ""
+    if c >= 0.8:
+        return "high"
+    elif c >= 0.5:
+        return "moderate"
+    else:
+        return "low/guess"
+
+
+def cmd_founder(show_all: bool = False):
     db_path = SAM_DATA_DIR / "founder_mode" / "founder_mode.db"
     if not db_path.exists():
         print("No Founder Mode data yet.")
         return
 
+    status_filter = "" if show_all else "WHERE (status IS NULL OR status = 'active')"
+
     with sqlite3.connect(db_path) as conn:
         decisions = conn.execute(
-            "SELECT timestamp, category, decision, reasoning FROM decisions ORDER BY id DESC LIMIT 20"
+            f"SELECT timestamp, category, decision, reasoning, confidence, source, status FROM decisions "
+            f"{status_filter} ORDER BY id DESC LIMIT 20"
         ).fetchall()
         taste = conn.execute(
-            "SELECT domain, preference FROM taste_profile ORDER BY updated_at DESC"
+            f"SELECT domain, preference, confidence, source, status FROM taste_profile "
+            f"{status_filter} ORDER BY updated_at DESC"
         ).fetchall()
         rejections = conn.execute(
-            "SELECT timestamp, category, what_was_rejected, why FROM rejections ORDER BY id DESC LIMIT 10"
+            f"SELECT timestamp, category, what_was_rejected, why, confidence, source, status FROM rejections "
+            f"{status_filter} ORDER BY id DESC LIMIT 10"
         ).fetchall()
 
     print(f"\n── DECISIONS ({len(decisions)}) ───────────────────────")
-    for ts, cat, dec, reason in decisions:
-        print(f"\n[{ts[:19]}] [{cat}]")
+    for ts, cat, dec, reason, conf, source, status in decisions:
+        tag = f" [{_conf_tag(conf)} conf, {source or 'manual'}]" if source else ""
+        status_note = f" ({status})" if status and status != "active" else ""
+        print(f"\n[{ts[:19]}] [{cat}]{tag}{status_note}")
         print(f"  {dec}")
         print(f"  Because: {reason}")
 
     print(f"\n── TASTE PROFILE ({len(taste)}) ──────────────────────")
-    for domain, pref in taste:
-        print(f"  [{domain}] {pref}")
+    for domain, pref, conf, source, status in taste:
+        tag = f" [{_conf_tag(conf)} conf, {source or 'manual'}]" if source else ""
+        status_note = f" ({status})" if status and status != "active" else ""
+        print(f"  [{domain}] {pref}{tag}{status_note}")
 
     print(f"\n── REJECTIONS ({len(rejections)}) ────────────────────")
-    for ts, cat, what, why in rejections:
-        print(f"\n[{ts[:19]}] [{cat}]")
+    for ts, cat, what, why, conf, source, status in rejections:
+        tag = f" [{_conf_tag(conf)} conf, {source or 'manual'}]" if source else ""
+        status_note = f" ({status})" if status and status != "active" else ""
+        print(f"\n[{ts[:19]}] [{cat}]{tag}{status_note}")
         print(f"  Rejected: {what[:100]}")
         print(f"  Because: {why[:100]}")
+    print(f"\n(Run 'founder --all' to include superseded/rejected entries)")
     print()
+
+
+def cmd_founder_review():
+    """Walk through LLM-auto-captured entries below full confidence and
+    let the user confirm (bump to 1.0) or reject (exclude from context)."""
+    sys.path.insert(0, str(Path(__file__).parent))
+    from founder_mode.manager import FounderModeManager
+    mgr = FounderModeManager()
+
+    captures = mgr.list_llm_captures()
+    if not captures:
+        print("Nothing to review — no unconfirmed LLM auto-captures.")
+        return
+
+    print(f"\n── FOUNDER MODE REVIEW ({len(captures)} to review) ──")
+    print("For each: [y] confirm  [n] reject  [s] skip  [q] quit\n")
+
+    for c in captures:
+        conf_pct = f"{float(c['confidence']) * 100:.0f}%" if c["confidence"] is not None else "?"
+        print(f"[{c['table']}] ({conf_pct} confidence)")
+        print(f"  {c['label'][:150]}")
+        choice = input("  y/n/s/q: ").strip().lower()
+
+        if choice == "q":
+            break
+        elif choice == "y":
+            mgr.confirm_capture(c["table"], c["id"])
+            print("  ✅ Confirmed.\n")
+        elif choice == "n":
+            mgr.reject_capture(c["table"], c["id"])
+            print("  ❌ Rejected — excluded from Founder Mode context.\n")
+        else:
+            print("  ⏭️  Skipped.\n")
 
 
 # ─── Skills ───────────────────────────────────────────────────────────────
@@ -332,7 +391,10 @@ def main():
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("status")
-    subparsers.add_parser("founder")
+    founder_p = subparsers.add_parser("founder")
+    founder_p.add_argument("--all", action="store_true", dest="show_all",
+                            help="Include superseded/rejected entries")
+    subparsers.add_parser("founder-review")
     subparsers.add_parser("skills")
     subparsers.add_parser("export")
     subparsers.add_parser("export-profile")
@@ -363,17 +425,19 @@ def main():
 
     commands = {
         "status": cmd_status,
-        "founder": cmd_founder,
         "skills": cmd_skills,
         "export": cmd_export,
         "export-profile": cmd_export_profile,
         "sync-status": cmd_sync_status,
         "reset-memory": cmd_reset_memory,
         "reset-all": cmd_reset_all,
+        "founder-review": cmd_founder_review,
     }
 
     if args.command in commands:
         commands[args.command]()
+    elif args.command == "founder":
+        cmd_founder(show_all=getattr(args, "show_all", False))
     elif args.command == "logs":
         cmd_logs(args.lines)
     elif args.command == "memory":

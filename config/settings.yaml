@@ -29,6 +29,10 @@ embedding_model: "nomic-embed-text"
 
 # Founder Mode
 founder_mode_enabled: true
+# v2 — LLM auto-capture (Evidence + Confidence). Uncomment to override defaults.
+# founder_mode_llm_capture: true
+# founder_mode_classifier_model: "qwen2.5:7b"   # defaults to primary_model if unset
+# founder_mode_min_confidence_to_show: 0.3
 
 # Runtime
 incognito: false

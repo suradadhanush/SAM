@@ -41,7 +41,7 @@ class SAM:
         self.settings = Settings()
         self.identity = Identity()
         self.memory = MemoryRetriever()
-        self.founder_mode = FounderModeManager()
+        self.founder_mode = FounderModeManager(settings=self.settings)
         self.brain = Brain(self.settings)
         self.tts = TextToSpeech(self.settings)
         self.stt = SpeechToText(self.settings)
