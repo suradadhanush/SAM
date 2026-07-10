@@ -8,6 +8,9 @@ import logging
 import json
 from typing import Optional, Dict, Any
 
+from agent import planner
+from agent.reflection import ReflectionEngine
+
 logger = logging.getLogger("SAM.Agent")
 
 MAX_STEPS = 10  # Safety limit on autonomous steps
@@ -20,6 +23,7 @@ class ReactLoop:
         self._browser = None
         self._terminal = None
         self._vision = None
+        self._reflection = ReflectionEngine(settings)
 
     def _get_control(self):
         if self._control is None:
@@ -71,6 +75,10 @@ class ReactLoop:
         """
         Run a multi-step autonomous task using ReAct loop.
         Continues until task is complete or MAX_STEPS reached.
+
+        Unchanged from before Phase 1, except it now also calls Reflection
+        at the end (wrapped safely — a reflection failure never affects
+        the returned result).
         """
         logger.info(f"Starting ReAct loop for task: {task}")
         observations = []
@@ -89,6 +97,7 @@ class ReactLoop:
             # Check if task is complete
             if response.action is None or response.action == "none":
                 logger.info("Task complete — no more actions needed")
+                self._safe_reflect(task, observations, response.text)
                 return response.text
 
             # Act: execute the action
@@ -104,7 +113,76 @@ class ReactLoop:
             current_input = f"Observation from last step: {observation}"
 
         logger.warning(f"ReAct loop reached max steps ({MAX_STEPS})")
-        return "I ran out of steps before completing the task. Please try again."
+        result = "I ran out of steps before completing the task. Please try again."
+        self._safe_reflect(task, observations, result)
+        return result
+
+    def run_planned_task(self, task: str, brain, session, founder_context: str = "") -> str:
+        """
+        Phase 1: Plans the task into ordered steps first, then executes
+        each step. Falls back to the original adaptive run_task() if
+        planning is unavailable or returns nothing — the old loop is
+        untouched and remains the default behaviour whenever planning
+        doesn't apply.
+        """
+        plan = planner.decompose(task, self.settings, founder_context)
+        if not plan:
+            logger.info("No plan available — falling back to adaptive ReAct loop")
+            return self.run_task(task, brain, session)
+
+        logger.info(f"Plan created with {len(plan)} step(s) for task: {task}")
+        observations = []
+        steps_run = 0
+
+        for planned_step in plan:
+            if steps_run >= MAX_STEPS:
+                logger.warning(f"Planned task exceeded MAX_STEPS ({MAX_STEPS}) — stopping early")
+                break
+            steps_run += 1
+
+            step_prompt = self._build_planned_step_prompt(task, plan, planned_step, observations)
+            session.user_input = step_prompt
+            response = brain.process(session)
+
+            if response.action and response.action != "none":
+                observation = self.execute(response.action, response.action_payload or {})
+            else:
+                observation = response.text
+
+            observations.append({
+                "step": planned_step["step"],
+                "action": response.action,
+                "description": planned_step["description"],
+                "observation": observation
+            })
+            logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
+
+        final_text = observations[-1]["observation"] if observations else "Task could not be started."
+        self._safe_reflect(task, observations, final_text)
+        return final_text
+
+    def _safe_reflect(self, task: str, observations: list, outcome: str):
+        """Reflection must never break or delay the response the user is
+        waiting on — always call this after the result is already decided."""
+        try:
+            self._reflection.reflect(task=task, steps=observations, outcome=outcome)
+        except Exception as e:
+            logger.debug(f"Reflection call skipped: {e}")
+
+    def _build_planned_step_prompt(self, task: str, plan: list, current_step: Dict, observations: list) -> str:
+        plan_text = "\n".join(f"{s['step']}. {s['description']}" for s in plan)
+        obs_text = "\n".join(
+            f"Step {o['step']} ({o['description']}): {o['observation']}" for o in observations
+        ) if observations else "None yet."
+
+        return (
+            f"Overall task: {task}\n\n"
+            f"Full plan:\n{plan_text}\n\n"
+            f"Steps completed so far:\n{obs_text}\n\n"
+            f"Now execute step {current_step['step']}: {current_step['description']}\n"
+            f"If this step needs an action, specify it. If it's already satisfied by the "
+            f"conversation so far, respond with action: null and a short status."
+        )
 
     def _build_react_prompt(self, task: str, observations: list, current: str) -> str:
         if not observations:

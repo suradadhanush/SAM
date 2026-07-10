@@ -85,6 +85,11 @@ class Settings:
     founder_mode_classifier_model: Optional[str] = None  # None -> uses primary_model
     founder_mode_min_confidence_to_show: float = 0.3
 
+    # Phase 1 — Planner + Reflection (agent/planner.py, agent/reflection.py)
+    # Both default to reusing primary_model if unset.
+    planner_model: Optional[str] = None
+    reflection_model: Optional[str] = None
+
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")
     compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")
