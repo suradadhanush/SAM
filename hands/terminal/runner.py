@@ -31,10 +31,19 @@ REQUIRES_CONFIRMATION = [
 
 
 class TerminalRunner:
-    def __init__(self, working_dir: str = None):
+    def __init__(self, working_dir: str = None, allow_risky: bool = False):
         import os
         self._working_dir = working_dir or os.path.expanduser("~")
         self._history = []
+        # Phase: main.py execution wiring. REQUIRES_CONFIRMATION existed
+        # before but was never actually checked anywhere — only
+        # BLOCKED_COMMANDS was enforced. Now that SAM can execute terminal
+        # actions autonomously from a conversation turn (not just when you
+        # manually call run_task), this needs to be a real gate, not a
+        # dormant list. Default is False — risky commands are refused with
+        # a clear message rather than run silently. Opt in via
+        # settings.allow_risky_terminal_commands if you want them enabled.
+        self._allow_risky = allow_risky
 
     def run(self, command: str, description: str = "") -> str:
         """
@@ -95,6 +104,16 @@ class TerminalRunner:
             if blocked in cmd_lower:
                 logger.warning(f"BLOCKED dangerous command: {command}")
                 return f"Blocked: This command ({blocked}) is not allowed for safety reasons."
+
+        if not self._allow_risky:
+            for risky in REQUIRES_CONFIRMATION:
+                if risky in cmd_lower:
+                    logger.warning(f"Refused risky command (needs manual confirmation): {command}")
+                    return (
+                        f"I didn't run this automatically because it needs manual confirmation: "
+                        f"'{command}'. Run it yourself, or enable allow_risky_terminal_commands "
+                        f"in settings if you want SAM to run this class of command on its own."
+                    )
 
         return None
 

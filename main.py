@@ -11,6 +11,7 @@ import sys
 import signal
 import logging
 import argparse
+from dataclasses import replace
 from pathlib import Path
 
 logging.basicConfig(
@@ -33,6 +34,7 @@ from mouth.tts import TextToSpeech
 from memory.identity import Identity
 from memory.retrieve import MemoryRetriever
 from founder_mode.manager import FounderModeManager
+from agent.react_loop import ReactLoop
 
 
 class SAM:
@@ -43,6 +45,7 @@ class SAM:
         self.memory = MemoryRetriever()
         self.founder_mode = FounderModeManager(settings=self.settings)
         self.brain = Brain(self.settings)
+        self.react_loop = ReactLoop(self.settings, founder_mode=self.founder_mode)
         self.tts = TextToSpeech(self.settings)
         self.stt = SpeechToText(self.settings)
         self.wake_word = WakeWordListener(self.settings, callback=self.on_wake_voice)
@@ -87,21 +90,51 @@ class SAM:
 
             # Get response from Brain
             response = self.brain.process(session)
-            logger.info(f"SAM: {response.text}")
+            logger.info(f"Brain response — action: {response.action}")
+
+            final_response = response
+
+            # If the Brain decided an action is needed, ACTUALLY execute it.
+            # Before this change, main.py only ever spoke response.text —
+            # which is the Brain's pre-action claim ("Opening YouTube...")
+            # written in the same breath as deciding the action, not a
+            # report of anything that happened. Nothing downstream of that
+            # ever ran. Now: run the task for real through the ReAct loop
+            # (Planner-first, verified with 1 retry, falls back to the
+            # adaptive loop if planning fails), and speak/save the loop's
+            # actual result instead of the pre-action guess.
+            if response.action and response.action not in (None, "none"):
+                try:
+                    real_result_text = self.react_loop.run_planned_task(
+                        task=user_input,
+                        brain=self.brain,
+                        session=session,
+                        founder_context=session.founder_context
+                    )
+                    final_response = replace(response, text=real_result_text)
+                except Exception as e:
+                    logger.error(f"Task execution failed: {e}", exc_info=True)
+                    final_response = replace(
+                        response,
+                        text=f"I tried to do that but hit an error: {e}"
+                    )
+
+            logger.info(f"SAM: {final_response.text}")
 
             # Always print response — useful in text mode
-            print(f"\nSAM: {response.text}\n")
+            print(f"\nSAM: {final_response.text}\n")
 
             # Speak response (unless in silent/text-only mode)
             if self.settings.tts_engine != "none":
-                self.tts.speak(response.text)
+                self.tts.speak(final_response.text)
 
-            # Save session to memory
+            # Save session to memory — records what actually happened,
+            # not the discarded pre-action claim
             if not self.settings.incognito:
-                session.save(user_input=user_input, response=response)
+                session.save(user_input=user_input, response=final_response)
 
-            # Founder Mode capture
-            self.founder_mode.capture_if_relevant(user_input, response)
+            # Founder Mode capture — same, sees the real outcome
+            self.founder_mode.capture_if_relevant(user_input, final_response)
 
         except Exception as e:
             logger.error(f"Processing error: {e}", exc_info=True)

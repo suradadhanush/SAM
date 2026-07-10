@@ -90,6 +90,11 @@ class Settings:
     planner_model: Optional[str] = None
     reflection_model: Optional[str] = None
 
+    # main.py execution wiring — real autonomous actions. Default False:
+    # commands like rm/mv/sudo/kill get refused with a clear message
+    # instead of running silently. Opt in deliberately.
+    allow_risky_terminal_commands: bool = False
+
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")
     compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")

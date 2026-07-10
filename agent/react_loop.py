@@ -46,7 +46,8 @@ class ReactLoop:
     def _get_terminal(self):
         if self._terminal is None:
             from hands.terminal.runner import TerminalRunner
-            self._terminal = TerminalRunner()
+            allow_risky = getattr(self.settings, "allow_risky_terminal_commands", False)
+            self._terminal = TerminalRunner(allow_risky=allow_risky)
         return self._terminal
 
     def _get_vision(self):
