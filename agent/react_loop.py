@@ -4,12 +4,14 @@ Reason → Act → Observe → Repeat until task complete.
 Routes Brain decisions to the correct Hand.
 """
 
+import time
 import logging
 import json
 from typing import Optional, Dict, Any
 
 from agent import planner
 from agent.reflection import ReflectionEngine
+from agent.verifier import Verifier
 
 logger = logging.getLogger("SAM.Agent")
 
@@ -17,13 +19,17 @@ MAX_STEPS = 10  # Safety limit on autonomous steps
 
 
 class ReactLoop:
-    def __init__(self, settings):
+    def __init__(self, settings, founder_mode=None):
         self.settings = settings
         self._control = None
         self._browser = None
         self._terminal = None
         self._vision = None
         self._reflection = ReflectionEngine(settings)
+        self._verifier = Verifier(settings)
+        # Optional — pass a FounderModeManager to let high-confidence
+        # reflections bridge into Founder Mode. Omit to keep old behaviour.
+        self.founder_mode = founder_mode
 
     def _get_control(self):
         if self._control is None:
@@ -71,6 +77,49 @@ class ReactLoop:
             logger.error(f"Action execution error: {e}", exc_info=True)
             return f"Error executing {action}: {str(e)}"
 
+    def _execute_verified(self, action: str, payload: Dict[str, Any], step_label: str) -> Dict:
+        """
+        Phase 1.5: executes an action, verifies the result, and retries
+        ONCE on failure (same action, same payload — no auto-repair).
+        Both attempts are always logged, and both are always included in
+        what gets passed to Reflection, whether the final outcome is a
+        success (after retry) or an abort (failed twice).
+        """
+        attempts = []
+
+        start = time.time()
+        observation = self.execute(action, payload)
+        elapsed = time.time() - start
+        result = self._verifier.verify(action, payload, observation, elapsed)
+        attempts.append({
+            "attempt": 1, "observation": observation,
+            "success": result.success, "confidence": result.confidence,
+            "errors": result.errors, "execution_time": elapsed,
+        })
+        decision = self._verifier.decide(result, already_retried=False)
+        logger.info(f"[{step_label}] attempt 1: {'OK' if result.success else 'FAILED'} (decision={decision})")
+
+        final_observation = observation
+        final_success = result.success
+
+        if decision == "retry":
+            start = time.time()
+            observation2 = self.execute(action, payload)
+            elapsed2 = time.time() - start
+            result2 = self._verifier.verify(action, payload, observation2, elapsed2)
+            attempts.append({
+                "attempt": 2, "observation": observation2,
+                "success": result2.success, "confidence": result2.confidence,
+                "errors": result2.errors, "execution_time": elapsed2,
+            })
+            final_decision = self._verifier.decide(result2, already_retried=True)
+            logger.info(f"[{step_label}] attempt 2 (retry): {'OK' if result2.success else 'FAILED'} "
+                        f"(decision={final_decision})")
+            final_observation = observation2
+            final_success = result2.success
+
+        return {"observation": final_observation, "success": final_success, "attempts": attempts}
+
     def run_task(self, task: str, brain, session) -> str:
         """
         Run a multi-step autonomous task using ReAct loop.
@@ -100,13 +149,15 @@ class ReactLoop:
                 self._safe_reflect(task, observations, response.text)
                 return response.text
 
-            # Act: execute the action
-            observation = self.execute(response.action, response.action_payload or {})
+            # Act: execute the action (Phase 1.5: verified, with 1 retry on failure)
+            verified = self._execute_verified(response.action, response.action_payload or {}, f"step {steps}")
+            observation = verified["observation"]
             observations.append({
                 "step": steps,
                 "action": response.action,
                 "payload": response.action_payload,
-                "observation": observation
+                "observation": observation,
+                "attempts": verified["attempts"]
             })
             logger.info(f"Observation: {observation[:100]}")
 
@@ -145,15 +196,21 @@ class ReactLoop:
             response = brain.process(session)
 
             if response.action and response.action != "none":
-                observation = self.execute(response.action, response.action_payload or {})
+                verified = self._execute_verified(
+                    response.action, response.action_payload or {}, f"step {planned_step['step']}"
+                )
+                observation = verified["observation"]
+                attempts = verified["attempts"]
             else:
                 observation = response.text
+                attempts = None
 
             observations.append({
                 "step": planned_step["step"],
                 "action": response.action,
                 "description": planned_step["description"],
-                "observation": observation
+                "observation": observation,
+                "attempts": attempts
             })
             logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
 
@@ -163,9 +220,12 @@ class ReactLoop:
 
     def _safe_reflect(self, task: str, observations: list, outcome: str):
         """Reflection must never break or delay the response the user is
-        waiting on — always call this after the result is already decided."""
+        waiting on — always call this after the result is already decided.
+        Passes self.founder_mode through (may be None) so high-confidence
+        lessons can bridge into Founder Mode when it's available."""
         try:
-            self._reflection.reflect(task=task, steps=observations, outcome=outcome)
+            self._reflection.reflect(task=task, steps=observations, outcome=outcome,
+                                      founder_mode=self.founder_mode)
         except Exception as e:
             logger.debug(f"Reflection call skipped: {e}")
 
