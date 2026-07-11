@@ -120,6 +120,24 @@ If not found, return: {{"x": null, "y": null}}"""
             if x is None or y is None:
                 return None
 
+            # Bug fixed here (found via more real Mac testing, AFTER the
+            # int()-truncation fix above already shipped): the scaling
+            # math was correct, but Moondream itself was returning literal
+            # (0.0, 0.0) as its ANSWER when it couldn't actually find the
+            # element — a well-known degenerate-guess failure mode in
+            # vision-language models asked for coordinates (collapsing to
+            # the origin instead of honestly returning the null/not-found
+            # case it was explicitly instructed to use). No real on-screen
+            # element is ever at the literal top-left corner pixel in
+            # practice, so treat that exact answer as "not found" rather
+            # than proceeding to click it — converts a guaranteed
+            # PyAutoGUI fail-safe crash into a clean, retryable
+            # "could not find X" result instead.
+            if abs(x) < 1e-6 and abs(y) < 1e-6:
+                logger.warning(f"Vision returned (0,0) for '{description}' — "
+                                f"treating as not-found rather than clicking the corner")
+                return None
+
             pixel_x, pixel_y = self._to_pixel_coords(x, y)
             logger.info(f"Found '{description}' at normalized ({x:.3f}, {y:.3f}) "
                         f"-> pixel ({pixel_x}, {pixel_y})")

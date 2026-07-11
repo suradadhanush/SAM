@@ -11,6 +11,7 @@ import sys
 import signal
 import logging
 import argparse
+import threading
 from dataclasses import replace
 from pathlib import Path
 
@@ -55,6 +56,20 @@ class SAM:
         )
         self._running = False
         self._input_mode = "text" if start_in_text_mode else "voice"
+        # Concurrency fix (found via real Mac testing): text_input.py and
+        # wake_word.py both fire an unsynchronized new thread per trigger.
+        # Without this lock, a second message arriving while the first was
+        # still processing (10-30+ seconds is normal) ran CONCURRENTLY on a
+        # separate thread, touching the same shared, NOT thread-safe state
+        # -- the cached Playwright Page in particular, whose sync API is
+        # bound to whichever thread created it. That's the exact mechanism
+        # behind the real "cannot switch to a different thread (which
+        # happens to have exited)" crash seen in testing, and also why
+        # typing "stop it" during a running task didn't stop anything -- it
+        # just started running concurrently instead of queuing after it.
+        # This lock is the single chokepoint both text and voice input
+        # converge on, so one lock here covers both input sources.
+        self._process_lock = threading.Lock()
 
     # ─── Input Handlers ───────────────────────────────────────────────────
 
@@ -73,7 +88,14 @@ class SAM:
     # ─── Core Processing ──────────────────────────────────────────────────
 
     def _process(self, user_input: str):
-        """Shared processing pipeline for both voice and text input."""
+        """Shared processing pipeline for both voice and text input.
+        Serialized via self._process_lock -- see __init__ for why."""
+        acquired = self._process_lock.acquire(blocking=False)
+        if not acquired:
+            print("\n[SAM] Still working on your previous request — "
+                  "this will run right after it finishes.\n")
+            self._process_lock.acquire()  # now wait our turn
+
         try:
             # Handle built-in commands first
             if self._handle_command(user_input):
@@ -143,6 +165,8 @@ class SAM:
             print(f"\nSAM: {error_msg}\n")
             if self.settings.tts_engine != "none":
                 self.tts.speak(error_msg)
+        finally:
+            self._process_lock.release()
 
     # ─── Commands ─────────────────────────────────────────────────────────
 
