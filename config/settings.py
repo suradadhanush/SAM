@@ -95,6 +95,12 @@ class Settings:
     # instead of running silently. Opt in deliberately.
     allow_risky_terminal_commands: bool = False
 
+    # Phase 2 — Telegram bridge (ecosystem/telegram_bridge.py).
+    # This is an internet-relay bridge, NOT local-WiFi ecosystem — command
+    # text passes through Telegram's servers. See docs/PHASE_2_TELEGRAM_BRIDGE.md.
+    telegram_bot_token: str = ""       # from @BotFather
+    telegram_bot_username: str = ""    # bot's @username, without the @
+
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")
     compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")

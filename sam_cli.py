@@ -163,6 +163,34 @@ def cmd_founder(show_all: bool = False):
     print()
 
 
+def cmd_devices():
+    from ecosystem.device_registry import DeviceRegistry
+    registry = DeviceRegistry()
+    registry.cleanup_expired_tokens()
+    devices = registry.list_devices()
+
+    if not devices:
+        print("No trusted devices. Run 'python -m ecosystem.pair_new_device' to pair one.")
+        return
+
+    print(f"\n── TRUSTED DEVICES ({len(devices)}) ──────────────────")
+    for d in devices:
+        last_active = d["last_active"][:19] if d["last_active"] else "never"
+        print(f"  [{d['id']}] {d['device_name']} ({d['channel']}) — "
+              f"paired {d['paired_at'][:10]}, last active {last_active}")
+    print()
+
+
+def cmd_revoke_device(device_id: int):
+    from ecosystem.device_registry import DeviceRegistry
+    registry = DeviceRegistry()
+    if registry.revoke(device_id):
+        print(f"Device {device_id} revoked — it can no longer send SAM commands.")
+    else:
+        print(f"No trusted device with id {device_id} found.")
+
+
+
 def cmd_founder_review():
     """Walk through LLM-auto-captured entries below full confidence and
     let the user confirm (bump to 1.0) or reject (exclude from context)."""
@@ -395,6 +423,9 @@ def main():
     founder_p.add_argument("--all", action="store_true", dest="show_all",
                             help="Include superseded/rejected entries")
     subparsers.add_parser("founder-review")
+    subparsers.add_parser("devices")
+    revoke_p = subparsers.add_parser("revoke-device")
+    revoke_p.add_argument("device_id", type=int)
     subparsers.add_parser("skills")
     subparsers.add_parser("export")
     subparsers.add_parser("export-profile")
@@ -432,10 +463,13 @@ def main():
         "reset-memory": cmd_reset_memory,
         "reset-all": cmd_reset_all,
         "founder-review": cmd_founder_review,
+        "devices": cmd_devices,
     }
 
     if args.command in commands:
         commands[args.command]()
+    elif args.command == "revoke-device":
+        cmd_revoke_device(args.device_id)
     elif args.command == "founder":
         cmd_founder(show_all=getattr(args, "show_all", False))
     elif args.command == "logs":

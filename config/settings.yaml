@@ -34,6 +34,10 @@ founder_mode_enabled: true
 # founder_mode_classifier_model: "qwen2.5:7b"   # defaults to primary_model if unset
 # founder_mode_min_confidence_to_show: 0.3
 
+# Phase 2 — Telegram bridge (internet-relay, not local-WiFi — see docs)
+# telegram_bot_token: "123456:ABC-your-bot-token-from-BotFather"
+# telegram_bot_username: "your_sam_bot"
+
 # Runtime
 incognito: false
 log_level: "INFO"
