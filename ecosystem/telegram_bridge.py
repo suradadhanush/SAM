@@ -148,7 +148,8 @@ class TelegramBridge:
             try:
                 real_result_text = self.react_loop.run_planned_task(
                     task=user_input, brain=self.brain, session=session,
-                    founder_context=session.founder_context
+                    founder_context=session.founder_context,
+                    initial_response=response
                 )
                 final_response = replace(response, text=real_result_text)
             except Exception as e:

@@ -127,16 +127,25 @@ def main():
         check("Reflection returns None when no lesson extracted (fails safe)", result is None)
 
     # ── Test 7: run_planned_task falls back to run_task when planning fails ──
+    # Isolated from the multi-step heuristic gate (same reasoning as Test 8
+    # below) so this genuinely tests "planner returned None", not
+    # "heuristic skipped the planner call" — different code paths to the
+    # same fallback, each deserving its own coverage.
     react = ReactLoop(settings)
     fake_brain = FakeBrain()
     fake_session = FakeSession()
-    with patch("agent.planner.decompose", return_value=None):
-        with patch.object(react, "_safe_reflect") as mock_reflect:
-            result_text = react.run_planned_task("some task with no plan", fake_brain, fake_session)
-            check("Falls back to run_task() when planner returns None", "Handled:" in result_text)
-            check("Reflection still called even on fallback path", mock_reflect.called)
+    with patch.object(react, "_looks_multi_step", return_value=True):
+        with patch("agent.planner.decompose", return_value=None):
+            with patch.object(react, "_safe_reflect") as mock_reflect:
+                result_text = react.run_planned_task("some task with no plan", fake_brain, fake_session)
+                check("Falls back to run_task() when planner returns None", "Handled:" in result_text)
+                check("Reflection still called even on fallback path", mock_reflect.called)
 
     # ── Test 8: run_planned_task executes a real plan step by step ───────
+    # This test verifies planned-execution mechanics specifically, so it
+    # forces past the multi-step heuristic gate (added as a latency fix,
+    # tested on its own in tests/test_latency_fixes_offline.py) rather than
+    # depending on the task string happening to contain a signal phrase.
     react2 = ReactLoop(settings)
     fake_brain2 = FakeBrain()
     fake_session2 = FakeSession()
@@ -144,15 +153,16 @@ def main():
         {"step": 1, "description": "First thing"},
         {"step": 2, "description": "Second thing"},
     ]
-    with patch("agent.planner.decompose", return_value=fake_plan):
-        with patch.object(react2, "_safe_reflect") as mock_reflect2:
-            result_text = react2.run_planned_task("multi-step task", fake_brain2, fake_session2)
-            check("Planned execution returns a result", "Handled:" in result_text)
-            check("Reflection called after planned execution", mock_reflect2.called)
-            # Verify it actually iterated both steps (2 calls means both steps ran)
-            call_args = mock_reflect2.call_args
-            observations_passed = call_args.args[1]
-            check("Both planned steps were executed", len(observations_passed) == 2)
+    with patch.object(react2, "_looks_multi_step", return_value=True):
+        with patch("agent.planner.decompose", return_value=fake_plan):
+            with patch.object(react2, "_safe_reflect") as mock_reflect2:
+                result_text = react2.run_planned_task("multi-step task", fake_brain2, fake_session2)
+                check("Planned execution returns a result", "Handled:" in result_text)
+                check("Reflection called after planned execution", mock_reflect2.called)
+                # Verify it actually iterated both steps (2 calls means both steps ran)
+                call_args = mock_reflect2.call_args
+                observations_passed = call_args.args[1]
+                check("Both planned steps were executed", len(observations_passed) == 2)
 
     print(f"\n{sum(results)}/{len(results)} checks passed.")
     if not all(results):

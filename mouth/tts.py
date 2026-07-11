@@ -26,6 +26,13 @@ class TextToSpeech:
         self._kokoro_pipeline = None
         self._kokoro_loaded = False
         self._pyttsx3_engine = None
+        # Latency fix: engines that fail once are skipped for the rest of
+        # this run instead of being retried every single turn. In real
+        # testing, Kokoro/Piper failing-then-falling-through was costing
+        # ~10+ seconds of wasted retry time on every response. Clears
+        # naturally on restart, so fixing the underlying issue (e.g.
+        # installing Piper) takes effect next run.
+        self._known_bad_engines = set()
         logger.info(f"TTS initialised for platform: {PLATFORM}")
 
     def speak(self, text: str):
@@ -35,13 +42,17 @@ class TextToSpeech:
         logger.info(f"Speaking: {text[:80]}...")
 
         for engine in self._get_engine_order():
+            if engine.__name__ in self._known_bad_engines:
+                continue
             try:
                 engine(text)
                 return
             except Exception as e:
-                logger.warning(f"TTS engine failed ({engine.__name__}): {e}")
+                logger.warning(f"TTS engine failed ({engine.__name__}): {e} "
+                                f"— skipping it for the rest of this session")
+                self._known_bad_engines.add(engine.__name__)
 
-        print(f"\n[SAM]: {text}\n")
+        self._speak_print(text)
 
     def _get_engine_order(self):
         engine_name = getattr(self.settings, "tts_engine", "kokoro")

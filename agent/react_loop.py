@@ -121,28 +121,51 @@ class ReactLoop:
 
         return {"observation": final_observation, "success": final_success, "attempts": attempts}
 
-    def run_task(self, task: str, brain, session) -> str:
+    # Latency fix #4: cheap keyword pre-filter so single-action requests
+    # ("open youtube", "what's the weather") skip the Planner's separate
+    # LLM call entirely, instead of every action paying for a planning
+    # round-trip it doesn't need. High recall on purpose — a false
+    # positive just means an unnecessary (but harmless) plan; a false
+    # negative means a genuinely multi-step task gets planned anyway
+    # since run_task's own adaptive loop still handles it correctly,
+    # just without the upfront plan.
+    _MULTI_STEP_SIGNALS = [
+        " then ", " after that", " after ", " and then", " next,",
+        " next ", ", then", "; then", " followed by", " once done",
+        " once that", " first,", " first ", " finally "
+    ]
+
+    def _looks_multi_step(self, task: str) -> bool:
+        t = f" {task.lower()} "
+        return any(sig in t for sig in self._MULTI_STEP_SIGNALS)
+
+    def run_task(self, task: str, brain, session, initial_response=None) -> str:
         """
         Run a multi-step autonomous task using ReAct loop.
         Continues until task is complete or MAX_STEPS reached.
 
-        Unchanged from before Phase 1, except it now also calls Reflection
-        at the end (wrapped safely — a reflection failure never affects
-        the returned result).
+        Latency fix #1: if initial_response is provided (the caller already
+        got a Brain response for this exact task — e.g. main.py's first
+        classification call), the first loop iteration reuses it instead of
+        calling brain.process() again for the same decision. Every
+        iteration after the first still reasons fresh, exactly as before.
+        Omit initial_response to get the old behaviour unchanged.
         """
         logger.info(f"Starting ReAct loop for task: {task}")
         observations = []
         steps = 0
 
         current_input = task
+        response = initial_response
 
         while steps < MAX_STEPS:
             steps += 1
             logger.info(f"ReAct step {steps}/{MAX_STEPS}")
 
-            # Reason: ask brain what to do next
-            session.user_input = self._build_react_prompt(task, observations, current_input)
-            response = brain.process(session)
+            if response is None:
+                # Reason: ask brain what to do next
+                session.user_input = self._build_react_prompt(task, observations, current_input)
+                response = brain.process(session)
 
             # Check if task is complete
             if response.action is None or response.action == "none":
@@ -163,38 +186,57 @@ class ReactLoop:
             logger.info(f"Observation: {observation[:100]}")
 
             current_input = f"Observation from last step: {observation}"
+            response = None  # force fresh reasoning on the next iteration
 
         logger.warning(f"ReAct loop reached max steps ({MAX_STEPS})")
         result = "I ran out of steps before completing the task. Please try again."
         self._safe_reflect(task, observations, result)
         return result
 
-    def run_planned_task(self, task: str, brain, session, founder_context: str = "") -> str:
+    def run_planned_task(self, task: str, brain, session, founder_context: str = "",
+                          initial_response=None) -> str:
         """
         Phase 1: Plans the task into ordered steps first, then executes
         each step. Falls back to the original adaptive run_task() if
-        planning is unavailable or returns nothing — the old loop is
+        planning is unavailable, returns nothing, or the task doesn't look
+        multi-step to begin with (latency fix #4) — the old loop is
         untouched and remains the default behaviour whenever planning
         doesn't apply.
+
+        Latency fix #1: initial_response (if provided) is reused for the
+        FIRST planned step instead of making a fresh Brain call for it —
+        the plan's first step is usually the same action the Brain already
+        decided on when first asked. Every step after that still reasons
+        fresh, exactly as before. This is an approximation, not a
+        guarantee the fresh-asked answer would've been identical — but it
+        was already just as much a guess before this change, and it saves
+        a full LLM round-trip on every single action turn.
         """
+        if not self._looks_multi_step(task):
+            logger.info("Task looks single-step — skipping Planner call")
+            return self.run_task(task, brain, session, initial_response=initial_response)
+
         plan = planner.decompose(task, self.settings, founder_context)
         if not plan:
             logger.info("No plan available — falling back to adaptive ReAct loop")
-            return self.run_task(task, brain, session)
+            return self.run_task(task, brain, session, initial_response=initial_response)
 
         logger.info(f"Plan created with {len(plan)} step(s) for task: {task}")
         observations = []
         steps_run = 0
 
-        for planned_step in plan:
+        for i, planned_step in enumerate(plan):
             if steps_run >= MAX_STEPS:
                 logger.warning(f"Planned task exceeded MAX_STEPS ({MAX_STEPS}) — stopping early")
                 break
             steps_run += 1
 
-            step_prompt = self._build_planned_step_prompt(task, plan, planned_step, observations)
-            session.user_input = step_prompt
-            response = brain.process(session)
+            if i == 0 and initial_response is not None:
+                response = initial_response
+            else:
+                step_prompt = self._build_planned_step_prompt(task, plan, planned_step, observations)
+                session.user_input = step_prompt
+                response = brain.process(session)
 
             if response.action and response.action != "none":
                 verified = self._execute_verified(
