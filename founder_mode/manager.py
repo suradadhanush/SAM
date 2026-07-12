@@ -270,6 +270,19 @@ class FounderModeManager:
                 if result["type"] == "none":
                     return  # Trust the classifier's negative — do nothing.
 
+                if result["type"] == "task_request":
+                    # Bug fixed here: this used to fall through and get
+                    # captured as a "decision" (technically defensible
+                    # under the old prompt, wrong in effect) — a one-time
+                    # action instruction ("open youtube and play X") would
+                    # then get injected into EVERY future prompt forever
+                    # via get_context(), making a stale task look like it
+                    # was "resumed" on a totally unrelated later question.
+                    # Trust the classifier's task_request call — do nothing.
+                    # The task itself is handled by the normal action-
+                    # execution pipeline in main.py, not by Founder Mode.
+                    return
+
                 if result["type"] == "decision":
                     self.capture_decision(
                         decision=result["statement"], reasoning=result["reasoning"],

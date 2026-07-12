@@ -11,6 +11,19 @@ FAILS SAFE: any error, timeout, or bad response returns a sentinel that
 tells the caller "classifier unavailable" — it never raises, and it never
 blocks or slows down the main SAM response the user is waiting on, because
 it always runs AFTER the response has already been spoken (see main.py).
+
+Bug fixed here (found via real Mac testing): "task_request" is a new type,
+added because one-time action instructions ("open youtube and play X")
+were being classified as "decision" — which was technically defensible
+under the old prompt (the user did state a choice with a reason) but
+wrong in effect, since Founder Mode injects every captured "decision" into
+EVERY future prompt forever via get_context(). A one-time task request
+captured that way meant the Brain saw "you decided to play this video" as
+persistent context on every later turn, regardless of relevance — which
+is the actual mechanism behind a stale task appearing to "resume" after a
+restart on an unrelated new question. task_request is explicitly excluded
+from capture (see manager.py's capture_if_relevant) — it's a signal to do
+nothing, same as "none".
 """
 
 import json
@@ -19,19 +32,22 @@ import requests
 
 logger = logging.getLogger("SAM.FounderMode.Classifier")
 
-# Sentinel types (in addition to "decision" | "rejection" | "preference" | "none")
+# Sentinel types (in addition to "decision" | "rejection" | "preference" |
+# "task_request" | "none")
 UNAVAILABLE = "_unavailable"
 
 CLASSIFIER_PROMPT = """You extract product-taste signals from one exchange between a user and their AI assistant.
 
 Decide if the user's message contains ONE of:
-- "decision": the user chose an approach and can explain why, even briefly
+- "decision": a PRODUCT, ARCHITECTURE, DESIGN, or PROCESS choice with a reason, meant to inform SIMILAR choices in the future (e.g. "I'm going with FastAPI over Flask because I know it better", "let's always use dark mode by default")
 - "rejection": the user rejected or disliked something and can explain why, even briefly
-- "preference": the user stated a durable preference or taste (tool, style, workflow)
-- "none": casual conversation, a question, small talk, or anything with no real taste/decision signal
+- "preference": the user stated a durable preference or taste (tool, style, workflow) that should apply going forward
+- "task_request": an instruction to DO something right now — open an app, play a video, browse a site, run a command, send a message. This is NOT a preference or decision, even if phrased like one ("I want you to...", "I've decided to open..."). The test: would this still make sense to show the user next week as "a decision you made"? If it's really just "do this one thing now", it's task_request, not decision.
+- "none": casual conversation, a question, small talk, or anything with no real signal in the above categories
 
 Rules:
 - Only extract if there is an actual stance, not just a question or observation.
+- When in doubt between "decision" and "task_request": a decision is something you'd want remembered and applied to FUTURE similar situations. A task_request is a one-time instruction whose relevance ends once the task is done. "Open YouTube and play the new trailer" is task_request. "Always open videos in the background instead of switching focus" is a decision.
 - "reasoning" must be the user's own justification, paraphrased in your words — never invent a reason they did not give. If no reason was given, write "no reason given".
 - "confidence" reflects how explicit the signal is:
     0.85-1.0 = explicit and unambiguous ("I'm going with X because Y", "I hate X, never suggest it again")
@@ -41,7 +57,7 @@ Rules:
 - "category" (decision/rejection only) is a short slug, e.g. "architecture", "design", "tooling", "process".
 
 Respond with ONLY this JSON, nothing else:
-{"type": "decision|rejection|preference|none", "category": "string", "domain": "string", "statement": "string", "reasoning": "string", "confidence": 0.0}
+{"type": "decision|rejection|preference|task_request|none", "category": "string", "domain": "string", "statement": "string", "reasoning": "string", "confidence": 0.0}
 
 User message: {user_input}
 Assistant reply: {response_text}
@@ -52,9 +68,12 @@ def classify(user_input: str, response_text: str, settings) -> dict:
     """
     Returns a dict with keys: type, category, domain, statement, reasoning, confidence.
 
-    type == "none"        -> classifier ran fine, genuinely no signal. Trust this.
-    type == "_unavailable" -> classifier could not run (Ollama down, bad JSON, timeout).
-                              Caller should fall back to lightweight heuristic capture.
+    type == "none"          -> classifier ran fine, genuinely no signal. Trust this.
+    type == "task_request"  -> classifier ran fine, this is a one-time action
+                                instruction, not a preference/decision. Trust
+                                this too — never capture it into Founder Mode.
+    type == "_unavailable"  -> classifier could not run (Ollama down, bad JSON, timeout).
+                                Caller should fall back to lightweight heuristic capture.
     """
     try:
         model = getattr(settings, "founder_mode_classifier_model", None) or settings.primary_model
@@ -88,12 +107,12 @@ def classify(user_input: str, response_text: str, settings) -> dict:
             "confidence": float(parsed.get("confidence", 0.5) or 0.5),
         }
 
-        if result["type"] not in ("decision", "rejection", "preference", "none"):
+        if result["type"] not in ("decision", "rejection", "preference", "task_request", "none"):
             result["type"] = "none"
 
         result["confidence"] = max(0.0, min(1.0, result["confidence"]))
 
-        if result["type"] != "none" and not result["statement"]:
+        if result["type"] not in ("none", "task_request") and not result["statement"]:
             result["type"] = "none"
 
         return result

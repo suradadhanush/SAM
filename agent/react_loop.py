@@ -16,6 +16,7 @@ from agent.verifier import Verifier
 logger = logging.getLogger("SAM.Agent")
 
 MAX_STEPS = 10  # Safety limit on autonomous steps
+STAGNATION_WINDOW = 3  # Abort early if this many consecutive observations are identical
 
 
 class ReactLoop:
@@ -139,6 +140,21 @@ class ReactLoop:
         t = f" {task.lower()} "
         return any(sig in t for sig in self._MULTI_STEP_SIGNALS)
 
+    def _is_stagnant(self, observations: list) -> bool:
+        """
+        Detects the ReAct loop being stuck repeating the exact same
+        observation instead of making progress — e.g. "No content found"
+        over and over, seen in real testing burning through all MAX_STEPS
+        without ever getting closer to done. Exact string match on
+        purpose: fuzzy similarity risks false-aborting on genuinely
+        different steps that happen to read similarly, which is worse
+        than occasionally missing a near-duplicate.
+        """
+        if len(observations) < STAGNATION_WINDOW:
+            return False
+        recent = [o.get("observation", "") for o in observations[-STAGNATION_WINDOW:]]
+        return recent[0] != "" and len(set(recent)) == 1
+
     def run_task(self, task: str, brain, session, initial_response=None) -> str:
         """
         Run a multi-step autonomous task using ReAct loop.
@@ -187,6 +203,16 @@ class ReactLoop:
 
             current_input = f"Observation from last step: {observation}"
             response = None  # force fresh reasoning on the next iteration
+
+            if self._is_stagnant(observations):
+                logger.warning(f"Stagnation detected — same observation repeated "
+                                f"{STAGNATION_WINDOW}x in a row, aborting early instead "
+                                f"of burning the remaining steps")
+                result = (f"I got stuck repeating the same result "
+                          f"('{observations[-1]['observation'][:80]}') without making "
+                          f"progress, so I stopped instead of continuing to retry.")
+                self._safe_reflect(task, observations, result)
+                return result
 
         logger.warning(f"ReAct loop reached max steps ({MAX_STEPS})")
         result = "I ran out of steps before completing the task. Please try again."
@@ -256,6 +282,15 @@ class ReactLoop:
                 "attempts": attempts
             })
             logger.info(f"Planned step {planned_step['step']}/{len(plan)}: {observation[:100]}")
+
+            if self._is_stagnant(observations):
+                logger.warning(f"Stagnation detected — same observation repeated "
+                                f"{STAGNATION_WINDOW}x in a row, aborting the plan early")
+                result = (f"I got stuck repeating the same result "
+                          f"('{observation[:80]}') without making progress, so I "
+                          f"stopped instead of continuing through the rest of the plan.")
+                self._safe_reflect(task, observations, result)
+                return result
 
         final_text = observations[-1]["observation"] if observations else "Task could not be started."
         self._safe_reflect(task, observations, final_text)
