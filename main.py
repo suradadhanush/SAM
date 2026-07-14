@@ -244,6 +244,27 @@ class SAM:
         signal.signal(signal.SIGINT, self._shutdown)
         signal.signal(signal.SIGTERM, self._shutdown)
 
+        # Phase 3: non-blocking license check. Per the frozen principle
+        # ("no hard license enforcement at launch — non-blocking warnings
+        # only"), this NEVER stops SAM from starting, even if unlicensed,
+        # expired, or invalid. It only logs/prints a notice. Flip
+        # settings.license_enforcement_enabled if you deliberately want
+        # enforcement later — this code path doesn't check that flag
+        # itself (enforcement logic, if ever added, is a separate,
+        # explicit decision from this notice).
+        try:
+            from licensing.license_manager import LicenseManager, LicenseStatus
+            status, message, lic = LicenseManager().check()
+            if status == LicenseStatus.VALID:
+                logger.info(f"License: {lic.product_edition} ({message})")
+            elif status == LicenseStatus.NO_LICENSE:
+                logger.info("Running unlicensed (non-blocking) — "
+                             "activate with: python sam_cli.py activate <file>")
+            else:
+                logger.warning(f"License check: {status} — {message} (non-blocking, SAM continues normally)")
+        except Exception as e:
+            logger.debug(f"License check skipped due to an internal error (non-blocking): {e}")
+
         ready_msg = "SAM is ready."
         print(f"\nSAM: {ready_msg}\n")
         self.tts.speak(ready_msg)

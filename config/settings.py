@@ -101,6 +101,12 @@ class Settings:
     telegram_bot_token: str = ""       # from @BotFather
     telegram_bot_username: str = ""    # bot's @username, without the @
 
+    # Phase 3 — Licensing. Matches the frozen principle: "no hard license
+    # enforcement at launch — non-blocking warnings only." Default is a
+    # warning at startup if unlicensed/invalid, never a lock-out. Flip to
+    # True only once you deliberately want enforcement.
+    license_enforcement_enabled: bool = False
+
     # Skills — in ~/.sam_data
     skills_path: str = str(SAM_DATA_DIR / "skills")
     compiled_skills_path: str = str(SAM_DATA_DIR / "skills" / "compiled")

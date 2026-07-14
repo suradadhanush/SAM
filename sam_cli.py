@@ -226,7 +226,32 @@ def cmd_founder_review():
 
 # ─── Skills ───────────────────────────────────────────────────────────────
 
-def cmd_skills():
+def cmd_license():
+    from licensing.license_manager import LicenseManager, LicenseStatus
+    mgr = LicenseManager()
+    status, message, lic = mgr.check()
+
+    print(f"\n── LICENSE STATUS ──────────────────────")
+    print(f"  Status: {status}")
+    print(f"  {message}")
+    if lic:
+        print(f"  Edition: {lic.product_edition}")
+        print(f"  Issued: {lic.issue_date[:10]}")
+        print(f"  {'Lifetime (never expires)' if lic.is_lifetime else f'Expires: {lic.expiry_date[:10]}'}")
+    if status == LicenseStatus.NO_LICENSE:
+        print(f"\n  Running unlicensed — this is fine for now (non-blocking, per current settings).")
+        print(f"  Install one with: python sam_cli.py activate <license_file.json>")
+    print()
+
+
+def cmd_activate(license_file: str):
+    from licensing.license_manager import LicenseManager
+    mgr = LicenseManager()
+    ok, message = mgr.install_license(license_file)
+    print(f"\n{'✅' if ok else '❌'} {message}\n")
+
+
+
     db_path = SAM_DATA_DIR / "skills" / "skills.db"
     if not db_path.exists():
         print("No compiled skills yet.")
@@ -433,6 +458,10 @@ def main():
     subparsers.add_parser("reset-memory")
     subparsers.add_parser("reset-all")
 
+    subparsers.add_parser("license")
+    activate_p = subparsers.add_parser("activate")
+    activate_p.add_argument("license_file")
+
     logs_p = subparsers.add_parser("logs")
     logs_p.add_argument("--lines", type=int, default=50)
 
@@ -464,10 +493,13 @@ def main():
         "reset-all": cmd_reset_all,
         "founder-review": cmd_founder_review,
         "devices": cmd_devices,
+        "license": cmd_license,
     }
 
     if args.command in commands:
         commands[args.command]()
+    elif args.command == "activate":
+        cmd_activate(args.license_file)
     elif args.command == "revoke-device":
         cmd_revoke_device(args.device_id)
     elif args.command == "founder":
