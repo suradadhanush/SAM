@@ -34,7 +34,7 @@
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/suradadhanush/SAM
+git clone https://github.com/dhanushsurada/SAM
 cd SAM
 
 # 2. Run setup (installs everything — takes 15-30 min first time)
